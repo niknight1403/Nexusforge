@@ -1,0 +1,4 @@
+/nexusforge
+*.apk
+.env
+/data/
