@@ -1,0 +1,5 @@
+*.apk
+.env
+/data/
+.gradle/
+**/build/
