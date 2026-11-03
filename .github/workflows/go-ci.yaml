@@ -1,0 +1,20 @@
+name: Go backend checks
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['cmd/**', 'internal/**', 'go.mod', '.github/workflows/go-ci.yaml']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build -o nexusforge ./cmd/nexusforge
