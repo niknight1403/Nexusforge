@@ -9,6 +9,8 @@ import (
  "fmt"
  "io"
  "net/http"
+ "net"
+ "net/url"
  "os"
  "strings"
  "time"
@@ -30,8 +32,15 @@ func configured() []Provider {
  }
  out := make([]Provider, 0, len(options))
  for _, v := range options { if v.key != "" { out = append(out, Provider{Name:v.name, Model:v.model, Endpoint:v.endpoint, Key:v.key}) } }
+ if endpoint := os.Getenv("OLLAMA_BASE_URL"); endpoint != "" {
+  parsed, err := url.Parse(endpoint)
+  if err == nil && parsed.Hostname() != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && (parsed.Scheme == "https" || (parsed.Scheme == "http" && isLoopback(parsed.Hostname()))) {
+   out = append(out, Provider{Name:"Ollama", Model:env("OLLAMA_MODEL","llama3.2"), Endpoint:strings.TrimRight(endpoint,"/")+"/v1/chat/completions"})
+  }
+ }
  return out
 }
+func isLoopback(host string) bool { return strings.EqualFold(host,"localhost") || (net.ParseIP(host)!=nil && net.ParseIP(host).IsLoopback()) }
 func env(k, fallback string) string { if v := os.Getenv(k); v != "" { return v }; return fallback }
 func New() *API { return &API{Router:Router{Providers:configured(), Client:&http.Client{Timeout:25*time.Second}}, Token:os.Getenv("NEXUSFORGE_ACCESS_TOKEN")} }
 
@@ -74,7 +83,7 @@ func (r Router) Chat(ctx context.Context, messages []Message) (ChatResponse,erro
  for _,p:=range r.Providers {
   reqbody,_:=json.Marshal(map[string]any{"model":p.Model,"messages":messages,"max_tokens":1024})
   req,err:=http.NewRequestWithContext(ctx,http.MethodPost,p.Endpoint,bytes.NewReader(reqbody));if err!=nil {continue}
-  req.Header.Set("Authorization","Bearer "+p.Key)
+  if p.Key != "" { req.Header.Set("Authorization","Bearer "+p.Key) }
   req.Header.Set("Content-Type","application/json")
   resp,err:=client.Do(req);if err!=nil {continue}
   limited:=io.LimitReader(resp.Body,1<<20); data,readErr:=io.ReadAll(limited);resp.Body.Close()
@@ -88,6 +97,9 @@ func (r Router) Chat(ctx context.Context, messages []Message) (ChatResponse,erro
 func reply(w http.ResponseWriter,status int,v any){w.Header().Set("Content-Type","application/json");w.WriteHeader(status);_ = json.NewEncoder(w).Encode(v)}
 func Listen(addr string) error {
  a:=New()
+ host, _, err := net.SplitHostPort(addr)
+ if err != nil { return fmt.Errorf("invalid bind address: %w",err) }
+ if a.Token == "" && !isLoopback(host) { return errors.New("NEXUSFORGE_ACCESS_TOKEN is mandatory for non-loopback binding") }
  srv:=&http.Server{Addr:addr,Handler:a.Handler(),ReadHeaderTimeout:10*time.Second,IdleTimeout:60*time.Second}
  return srv.ListenAndServe()
 }
